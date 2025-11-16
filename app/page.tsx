@@ -1,7 +1,25 @@
 "use client";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type JsonRow = Record<string, string>;
+type UploadedFile = {
+  filename: string;
+  size: number;
+  mtime: number;
+  path: string; // relative like "uploaded/<name>"
+};
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let i = -1;
+  do {
+    bytes = bytes / 1024;
+    i++;
+  } while (bytes >= 1024 && i < units.length - 1);
+  return `${bytes.toFixed(bytes < 10 ? 1 : 0)} ${units[i]}`;
+}
 
 export default function CsvToJsonPage() {
   const [csvText, setCsvText] = useState("");
@@ -10,6 +28,31 @@ export default function CsvToJsonPage() {
   const [filename, setFilename] = useState<string>("data");
   const [uploadInfo, setUploadInfo] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploaded, setUploaded] = useState<UploadedFile[] | null>(null);
+  const [uploadedError, setUploadedError] = useState<string | null>(null);
+  const [uploadedLoading, setUploadedLoading] = useState<boolean>(false);
+
+  const refreshUploaded = useCallback(async () => {
+    try {
+      setUploadedLoading(true);
+      setUploadedError(null);
+      const res = await fetch("/api/uploaded");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Failed to fetch: ${res.status}`);
+      setUploaded(Array.isArray(data?.files) ? data.files : []);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load uploaded files";
+      setUploadedError(msg);
+      setUploaded(null);
+    } finally {
+      setUploadedLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Load on mount
+    refreshUploaded();
+  }, [refreshUploaded]);
 
   const onPickFile = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -43,6 +86,8 @@ export default function CsvToJsonPage() {
           throw new Error(data?.error || `Upload failed with status ${res.status}`);
         }
         setUploadInfo(`Saved as ${data?.path || data?.filename || "(unknown)"}`);
+        // Refresh file list
+        refreshUploaded();
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Upload failed";
         setUploadInfo(`Upload error: ${msg}`);
@@ -114,6 +159,68 @@ export default function CsvToJsonPage() {
               />
             </div>
           </header>
+
+          {/* Uploaded files list */}
+          <section className="mb-8 rounded-2xl border border-neutral-200 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-medium">Uploaded files</h2>
+              <button
+                onClick={refreshUploaded}
+                className="text-sm rounded-lg px-3 py-1.5 bg-neutral-900 text-white hover:opacity-90"
+                aria-label="Refresh uploaded files"
+              >
+                Refresh
+              </button>
+            </div>
+            {uploadedLoading && <div className="text-sm text-neutral-500">Loading…</div>}
+            {uploadedError && <div className="text-sm text-red-600">{uploadedError}</div>}
+            {!uploadedLoading && !uploadedError && (
+              <ul className="divide-y divide-neutral-100">
+                {(uploaded ?? []).length === 0 ? (
+                  <li className="py-3 text-sm text-neutral-500">No files uploaded yet.</li>
+                ) : (
+                  (uploaded ?? []).map((f) => (
+                    <li key={f.filename} className="py-3 flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-sm">{f.filename}</div>
+                        <div className="text-xs text-neutral-500">
+                          {formatBytes(f.size)} • {new Date(f.mtime).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2">
+                        <a
+                          href={`/api/uploaded/${encodeURIComponent(f.filename)}`}
+                          className="text-sm rounded-lg px-3 py-1.5 bg-white ring-1 ring-neutral-200 hover:bg-neutral-100"
+                          aria-label={`Download ${f.filename}`}
+                        >
+                          Download
+                        </a>
+                        <button
+                          onClick={async () => {
+                            const ok = window.confirm(`Delete ${f.filename}?`);
+                            if (!ok) return;
+                            try {
+                              const res = await fetch(`/api/uploaded/${encodeURIComponent(f.filename)}`, { method: "DELETE" });
+                              const data = await res.json().catch(() => ({}));
+                              if (!res.ok) throw new Error(data?.error || `Failed: ${res.status}`);
+                              await refreshUploaded();
+                            } catch (e: unknown) {
+                              const msg = e instanceof Error ? e.message : "Delete failed";
+                              alert(msg);
+                            }
+                          }}
+                          className="text-sm rounded-lg px-3 py-1.5 bg-red-600 text-white hover:opacity-90"
+                          aria-label={`Delete ${f.filename}`}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            )}
+          </section>
 
           {/* Dropzone */}
           <div

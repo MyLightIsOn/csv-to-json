@@ -1,33 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-
-// Ensure uploads go to the local `uploaded` directory in the project root
-const UPLOAD_DIR = path.join(process.cwd(), "uploaded");
-
-function ensureUploadDir() {
-  if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-  }
-}
-
-function sanitizeFilename(name: string) {
-  // Remove path separators and control characters
-  return name.replace(/[\\/\0\x00-\x1F\x7F]+/g, "_");
-}
-
-function uniqueFilename(originalName: string) {
-  const ext = path.extname(originalName);
-  const base = path.basename(originalName, ext);
-  const safeBase = sanitizeFilename(base) || "file";
-  const safeExt = sanitizeFilename(ext);
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .replace("T", "_")
-    .slice(0, 19); // YYYY-MM-DD_HH-MM-SS
-  return `${safeBase}__${stamp}${safeExt}`;
-}
+import { ensureUploadDir, uniqueFilename } from "@/lib/server/uploads";
 
 export async function POST(req: Request) {
   try {
@@ -43,7 +17,7 @@ export async function POST(req: Request) {
 
     ensureUploadDir();
     const name = uniqueFilename(file.name || "upload");
-    const targetPath = path.join(UPLOAD_DIR, name);
+    const targetPath = path.join(process.cwd(), "uploaded", name);
     await fs.promises.writeFile(targetPath, buffer);
 
     return NextResponse.json({
