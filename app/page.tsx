@@ -8,12 +8,14 @@ export default function CsvToJsonPage() {
   const [rows, setRows] = useState<JsonRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filename, setFilename] = useState<string>("data");
+  const [uploadInfo, setUploadInfo] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const onPickFile = useCallback(() => fileInputRef.current?.click(), []);
 
   const handleFile = useCallback((file: File) => {
     setError(null);
+    setUploadInfo(null);
     setFilename(file.name.replace(/\.[^.]+$/, ""));
     const reader = new FileReader();
     reader.onload = () => {
@@ -29,6 +31,23 @@ export default function CsvToJsonPage() {
     };
     reader.onerror = () => setError("Could not read the file.");
     reader.readAsText(file);
+
+    // Also upload the file to the server so it is saved in the `uploaded` folder
+    (async () => {
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: form });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.error || `Upload failed with status ${res.status}`);
+        }
+        setUploadInfo(`Saved as ${data?.path || data?.filename || "(unknown)"}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setUploadInfo(`Upload error: ${msg}`);
+      }
+    })();
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -107,6 +126,9 @@ export default function CsvToJsonPage() {
 
           {/* Text input */}
           <label className="mb-2 block text-sm font-medium text-neutral-700">CSV Input</label>
+          {uploadInfo && (
+            <div className="mb-3 text-xs text-neutral-600">{uploadInfo}</div>
+          )}
           <textarea
               className="h-48 w-full resize-y rounded-2xl border border-neutral-300 bg-white p-4 font-mono text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-black"
               placeholder={`title,priority,status\n"Color contrast on login button fails WCAG 1.4.3",High,Open`}
